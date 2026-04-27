@@ -106,7 +106,7 @@ def search_soulseek(query: str, limit: int = 100, timeout: int = 40) -> list[Tra
                         filename=f.get("filename", ""),
                         size=f.get("size", 0),
                         username=username,
-                        bitrate=f.get("bitRate", 0) or f.get("averageBitRate", 0),
+                        bitrate=f.get("averageBitRate", 0) or f.get("bitRate", 0),
                         extension=f.get("extension", ""),
                         length=f.get("length", 0),
                         sample_rate=f.get("sampleRate", 0),
@@ -169,7 +169,7 @@ def enqueue_download(tracks: list[Track], token: str) -> list[str]:
         by_user.setdefault(t.username, []).append(t)
 
     for username, user_tracks in by_user.items():
-        files = [{"filename": t.filename} for t in user_tracks]
+        files = [{"filename": t.filename, "size": t.size} for t in user_tracks]
         r = subprocess.run(
             ["curl", "-s", "-X", "POST",
              f"{SLSKD_BASE}/api/v0/transfers/downloads/{username}",
