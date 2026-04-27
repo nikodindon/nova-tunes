@@ -18,7 +18,15 @@ services:
     network_mode: host
     ports:
       - "5030:5030"
-      - "5533:5533"
+      - "50300:50300"
     volumes:
-      - ./soulseek/data:/data
+      - ./soulseek/data:/app
       - ./music:/music
+    environment:
+      - SLSKD_SOULSEEK_USERNAME=${SLSKD_USERNAME}
+      - SLSKD_SOULSEEK_PASSWORD=${SLSKD_PASSWORD}
+      - SLSKD_WEB_AUTHENTICATION_DISABLED=false
+      - SLSKD_WEB_AUTHENTICATION_USERNAME=${SLSKD_WEB_USER:-slskd}
+      - SLSKD_WEB_AUTHENTICATION_PASSWORD=${SLSKD_WEB_PASS:-slskd}
+      - SLSKD_DIRECTORIES_DOWNLOADS=/music
+    user: "1000:1000"

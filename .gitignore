@@ -1,6 +1,7 @@
 # ── Music & media ────────────────────────────────────────────
 music/
 navidrome/data/
+soulseek/data/
 soulseek/appdata/
 soulseek/shared/
 soulseek-like/downloads/
