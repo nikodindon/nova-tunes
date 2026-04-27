@@ -1,218 +1,250 @@
 #!/usr/bin/env python3
 """
-Nova-Tunes Downloader — slskd API wrapper (v2)
+Nova-Tunes Downloader — slskd API wrapper (v3)
+
 Search and download music via Soulseek network through slskd daemon.
-Usage: python3 download.py "artist - song title"
+Falls back to yt-dlp if slskd is unreachable.
+
+Usage:
+    python3 download.py "artist - song title"     Download best match
+    python3 download.py "artist - song title" --list   Show top results only
 """
 
-import sys
-import json
 import argparse
+import json
+import subprocess
+import sys
 import time
 import uuid
-import requests
+from dataclasses import dataclass
 from pathlib import Path
 
-# ── Config ────────────────────────────────────────────────────────────────
-SLSKD_BASE   = "http://localhost:5030"
-SLSKD_API    = f"{SLSKD_BASE}/api/v0"
-MUSIC_DIR    = Path(__file__).parent.parent / "music"
-DATA_DIR     = Path(__file__).parent.parent / "data"
-LOG_FILE     = DATA_DIR / "download.log"
-WEB_USER     = "slskd"
-WEB_PASS     = "slskd"
-API_TIMEOUT  = 30
-RATE_LIMIT  = 1.0   # seconds between requests
+SLSKD_BASE = "http://localhost:5030"
+WEB_USER = "slskd"
+WEB_PASS = "slskd"
 
-# ── Helpers ───────────────────────────────────────────────────────────────
-def log(msg):
-    ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] {msg}"
-    print(line)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    LOG_FILE.write_text(LOG_FILE.read_text() + line + "\n" if LOG_FILE.exists() else line + "\n")
 
-def get_token():
-    r = requests.post(
-        f"{SLSKD_API}/session",
-        json={"username": WEB_USER, "password": WEB_PASS},
-        timeout=API_TIMEOUT
+@dataclass
+class Track:
+    filename: str
+    size: int  # bytes
+    username: str
+    bitrate: int
+    extension: str
+    length: int  # seconds
+
+
+def api_session() -> str:
+    """Get slskd Bearer token."""
+    r = subprocess.run(
+        ["curl", "-s", "-X", "POST", f"{SLSKD_BASE}/api/v0/session",
+         "-H", "Content-Type: application/json",
+         "-d", json.dumps({"username": WEB_USER, "password": WEB_PASS})],
+        capture_output=True, text=True
     )
-    r.raise_for_status()
-    return r.json()["token"]
+    return json.loads(r.stdout)["token"]
 
-def api_get(path, token, params=None):
-    r = requests.get(
-        f"{SLSKD_API}{path}",
-        headers={"Authorization": f"Bearer {token}"},
-        params=params,
-        timeout=API_TIMEOUT
+
+def api_get(path: str, token: str) -> dict | list:
+    r = subprocess.run(
+        ["curl", "-s", f"{SLSKD_BASE}/api/v0/{path}",
+         "-H", f"Authorization: Bearer {token}"],
+        capture_output=True, text=True
     )
-    r.raise_for_status()
-    return r.json()
+    return json.loads(r.stdout)
 
-def api_post(path, token, json=None):
-    r = requests.post(
-        f"{SLSKD_API}{path}",
-        headers={"Authorization": f"Bearer {token}"},
-        json=json,
-        timeout=API_TIMEOUT
+
+def api_post(path: str, token: str, data: dict) -> dict | list:
+    r = subprocess.run(
+        ["curl", "-s", "-X", "POST", f"{SLSKD_BASE}/api/v0/{path}",
+         "-H", "Content-Type: application/json",
+         "-H", f"Authorization: Bearer {token}",
+         "-d", json.dumps(data)],
+        capture_output=True, text=True
     )
-    r.raise_for_status()
-    return r.json()
+    return json.loads(r.stdout)
 
-def wait():
-    time.sleep(RATE_LIMIT)
 
-# ── Core actions ──────────────────────────────────────────────────────────
-def do_search(token, query, limit=8, poll_interval=3, max_polls=8):
-    """Launch search and poll until results arrive."""
+def search_soulseek(query: str, limit: int = 50, timeout: int = 30) -> list[Track]:
+    """
+    Search Soulseek for tracks matching query.
+    Polls until results arrive or timeout.
+    Returns list of Track objects sorted by bitrate (best first).
+    """
+    token = api_session()
     search_id = str(uuid.uuid4())
-    log(f"Recherche Soulseek : '{query}'")
 
-    # Launch search
-    api_post("/searches", token, {"id": search_id, "searchText": query})
+    api_post("searches", token, {"id": search_id, "searchText": query})
 
-    # Poll for results
-    for _ in range(max_polls):
-        time.sleep(poll_interval)
-        result = api_get(f"/searches/{search_id}", token, params={"includeResponses": "true"})
-        state = result.get("state", "")
-        response_count = result.get("responseCount", 0)
-
-        if state == "InProgress" and response_count > 0:
-            # Got some responses, keep polling for more
-            if response_count >= limit:
-                break
-        elif state.startswith("Completed"):
+    # Poll until we get responses
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(3)
+        state = api_get(f"searches/{search_id}", token)
+        if state.get("responseCount", 0) > 0:
             break
 
-    log(f"  -> {response_count} reponses, {result.get('fileCount', 0)} fichiers")
+    # Fetch all responses
+    responses = api_get(f"searches/{search_id}/responses", token)
 
-    # Collect all files from all responses
-    files = []
-    for resp in result.get("responses", []):
-        username = resp.get("username", "")
+    tracks = []
+    for resp in responses:
+        username = resp.get("username", "unknown")
         for f in resp.get("files", []):
-            f["_username"] = username
-            files.append(f)
+            tracks.append(Track(
+                filename=f.get("filename", ""),
+                size=f.get("size", 0),
+                username=username,
+                bitrate=f.get("bitRate", 0),
+                extension=f.get("extension", ""),
+                length=f.get("length", 0)
+            ))
 
-    return files
+    # Sort: highest bitrate first, then by size descending
+    tracks.sort(key=lambda t: (t.bitrate * -1, t.size * -1))
+    return tracks[:limit]
 
-def pick_best(files, n=5):
-    """Pick best quality files: prefer mp3/flac, larger size."""
-    def score(f):
-        name = f.get("filename", "")
-        size = f.get("size", 0)
-        ext  = name.lower().split(".")[-1] if "." in name else ""
-        q    = 100 if ext in {"mp3", "flac"} else (50 if ext in {"m4a", "aac", "wav"} else 10)
-        # Penalize guitar pro tabs
-        if "guitar pro" in name.lower() or ext in {"gp3", "gp4", "gp5", "gpx"}:
-            q = 1
-        return q * 1_000_000_000 + size
 
-    files.sort(key=score, reverse=True)
-    return files[:n]
+def pick_best_track(tracks: list[Track]) -> Track:
+    """Pick the best quality track (highest bitrate, then largest size)."""
+    return tracks[0]
 
-def enqueue_download(token, file_entry):
-    """Enqueue a single file for download."""
-    f = file_entry
-    username = f.get("_username", "")
-    filename = f.get("filename", "")
-    size     = f.get("size", 0)
-    length   = f.get("length", 0)
-    bitrate  = f.get("bitrate", 0)
 
-    payload = [{
-        "username":  username,
-        "filename": filename,
-        "size":     size,
-        "length":   length,
-        "bitrate":  bitrate,
-    }]
+def enqueue_download(track: Track, token: str) -> str:
+    """
+    Enqueue a track for download.
+    Returns transfer ID.
+    """
+    # The file needs to be sent as: { "filename": "...", "size": N }
+    file_desc = {"filename": track.filename, "size": track.size}
 
-    log(f"Enqueue: {filename.split(chr(92))[-1]} ({size // (1024*1024)} MB) depuis @{username}")
-    result = api_post(f"/transfers/downloads/{username}", token, payload)
+    # POST /transfers/downloads/{username} with array of files
+    r = subprocess.run(
+        ["curl", "-s", "-X", "POST",
+         f"{SLSKD_BASE}/api/v0/transfers/downloads/{track.username}",
+         "-H", "Content-Type: application/json",
+         "-H", f"Authorization: Bearer {token}",
+         "-d", json.dumps([file_desc])],
+        capture_output=True, text=True
+    )
+    result = json.loads(r.stdout)
+    # Returns list of enqueued transfers
+    if isinstance(result, list) and result:
+        return result[0].get("id", "")
+    return ""
 
-    enqueued = result.get("enqueued", [])
-    if enqueued:
-        t = enqueued[0]
-        log(f"  -> Queue position: {t.get('state')} | {t.get('id')}")
-    return result
 
-def get_downloads(token):
-    """Return list of active/recent downloads."""
-    return api_get("/transfers/downloads", token)
+def get_transfer_status(token: str) -> list[dict]:
+    r = subprocess.run(
+        ["curl", "-s", f"{SLSKD_BASE}/api/v0/transfers/downloads",
+         "-H", f"Authorization: Bearer {token}"],
+        capture_output=True, text=True
+    )
+    return json.loads(r.stdout)
 
-# ── CLI ──────────────────────────────────────────────────────────────────
+
+def download_ytdlp(query: str) -> bool:
+    """Fallback to yt-dlp for YouTube/SoundCloud."""
+    cmd = ["/home/niko/bin/yt-dlp", "--no-playlist", "-x", "--audio-format", "mp3",
+           "-o", "/tmp/nova-tunes.%(ext)s", f"ytsearch1:{query}"]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode == 0:
+        print(f"  [yt-dlp] Downloaded via YouTube")
+        return True
+    return False
+
+
+def format_size(size: int) -> str:
+    mb = size / 1024 / 1024
+    if mb >= 1024:
+        return f"{mb/1024:.1f} GB"
+    return f"{mb:.1f} MB"
+
+
+def format_bitrate(br: int) -> str:
+    return f"{br} kbps" if br else "?"
+
+
 def main():
-    p = argparse.ArgumentParser(description="Nova-Tunes downloader via slskd Soulseek API")
-    p.add_argument("query", nargs="?", help="Search query (artist - title)")
-    p.add_argument("--limit", "-n", type=int, default=8, help="Max results to search (default: 8)")
-    p.add_argument("--top", "-t", action="store_true", help="Download top result only (default)")
-    p.add_argument("--all", "-a", action="store_true", help="Download all results (up to --limit)")
-    p.add_argument("--list", "-l", action="store_true", help="Search and list results only (no download)")
-    p.add_argument("--status", "-s", action="store_true", help="Show download queue")
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description="Nova-Tunes downloader")
+    parser.add_argument("query", help="Search query (artist - title)")
+    parser.add_argument("--list", action="store_true", help="Show results only, don't download")
+    parser.add_argument("--limit", type=int, default=50, help="Max results (default: 50)")
+    parser.add_argument("--timeout", type=int, default=30, help="Search timeout seconds (default: 30)")
+    args = parser.parse_args()
 
-    # Get auth token
+    print(f"[{time.strftime('%H:%M:%S')}] Recherche Soulseek : {args.query!r}")
+
     try:
-        token = get_token()
+        tracks = search_soulseek(args.query, limit=args.limit, timeout=args.timeout)
     except Exception as e:
-        log(f"ERREUR: Impossible de se connecter a slskd: {e}")
-        sys.exit(1)
+        print(f"  Erreur Soulseek: {e}")
+        print("  Fallback: yt-dlp...")
+        ok = download_ytdlp(args.query)
+        sys.exit(0 if ok else 1)
 
-    if args.status:
-        downloads = get_downloads(token)
-        print(f"\n  Download queue ({len(downloads) if isinstance(downloads, list) else '?'} items):\n")
-        if isinstance(downloads, list):
-            for t in downloads:
-                fname = t.get("filename", "?")
-                # Get last part of path
-                if chr(92) in fname:
-                    fname = fname.split(chr(92))[-1]
-                state = t.get("state", "?")
-                pct   = t.get("percentComplete", 0)
-                speed = t.get("averageSpeed", 0)
-                print(f"  [{pct:3d}%] {fname}")
-                print(f"         {state} | {speed//1024} KB/s")
-        else:
-            print(json.dumps(downloads, indent=2)[:500])
-        return
-
-    if not args.query:
-        p.print_help()
-        return
-
-    files = do_search(token, args.query, limit=args.limit)
-    if not files:
-        log("Aucun resultat.")
-        return
-
-    best = pick_best(files, n=args.limit)
-
-    print(f"\n  Resultats pour '{args.query}' (top {len(best)}):\n")
-    for i, f in enumerate(best, 1):
-        fname = f.get("filename", "?")
-        if chr(92) in fname:
-            fname = fname.split(chr(92))[-1]
-        size = f.get("size", 0) // (1024*1024)
-        user = f.get("_username", "?")
-        bitrate = f.get("bitrate", 0)
-        print(f"  [{i}] {fname}  ({size} MB) @{user} {bitrate}kbps")
-    print()
+    if not tracks:
+        print("  Aucun résultat.")
+        print("  Fallback: yt-dlp...")
+        ok = download_ytdlp(args.query)
+        sys.exit(0 if ok else 1)
 
     if args.list:
+        print(f"  {len(tracks)} fichiers trouvés (top {min(10, len(tracks))}):")
+        for i, t in enumerate(tracks[:10]):
+            ext = t.extension.upper()
+            print(f"  {i+1:2d}. [{ext}] {format_bitrate(t.bitrate):>8s}  {format_size(t.size):>8s}  {t.filename}  ({t.username})")
         return
 
-    to_download = best if args.all else [best[0]]
+    track = pick_best_track(tracks)
+    print(f"  -> Meilleure correspondance: {track.filename}")
+    print(f"     {format_bitrate(track.bitrate)}  {format_size(track.size)}  de {track.username}")
 
-    for f in to_download:
-        enqueue_download(token, f)
-        wait()
+    # Strip path prefix for display (Soulseek paths are like: music/Artist/Album/...)
+    display_name = Path(track.filename).name
+    print(f"  Enqueue pour téléchargement...")
 
-    log(f"-> {len(to_download)} fichier(s) ajoutes a la queue.")
-    print(f"\n  Telechargement en cours... http://localhost:5030\n")
+    try:
+        token = api_session()
+        transfer_id = enqueue_download(track, token)
+        if transfer_id:
+            print(f"  Transfert lancé (ID: {transfer_id[:8]}...)")
+        else:
+            print(f"  Transfert en cours...")
+    except Exception as e:
+        print(f"  Erreur download: {e}")
+        sys.exit(1)
+
+    # Poll until done
+    print(f"  Suivi du transfert...")
+    last_state = ""
+    while True:
+        time.sleep(5)
+        try:
+            transfers = get_transfer_status(token)
+        except:
+            break
+        # Find our transfer
+        ours = None
+        for t in (transfers if isinstance(transfers, list) else []):
+            if track.filename in str(t):
+                ours = t
+                break
+        if not ours:
+            # Download completed (removed from active list)
+            print(f"  [OK] Téléchargement terminé!")
+            break
+        state = ours.get("state", "?")
+        if state != last_state:
+            print(f"  -> {state}")
+            last_state = state
+        if "Completed" in state or "Succeeded" in state:
+            print(f"  [OK] {state}")
+            break
+        if "Failed" in state or "Error" in state:
+            print(f"  [ERREUR] {state}")
+            break
+
 
 if __name__ == "__main__":
     main()
