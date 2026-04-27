@@ -1,0 +1,28 @@
+# ── Music & media ────────────────────────────────────────────
+music/
+navidrome/data/
+soulseek/appdata/
+soulseek/shared/
+soulseek-like/downloads/
+*.mp3 *.flac *.wav *.ogg *.m4a *.aac
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+recommender/__pycache__/
+*.egg-info/
+.eggs/
+
+# ── Docker ────────────────────────────────────────────────────
+.docker/
+
+# ── Logs & cache ─────────────────────────────────────────────
+*.log
+*.log.*
+data/download.log
+data/library_cache.json
+*.part
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

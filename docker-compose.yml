@@ -1,0 +1,27 @@
+services:
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: navidrome
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./navidrome/data:/data
+      - ./music:/music:ro
+    environment:
+      - ND_SCANSCHEDULE=1h
+      - ND_LOGLEVEL=info
+
+  soulseek:
+    image: realies/soulseek
+    container_name: soulseek
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./soulseek/appdata:/data/.SoulseekQt
+      - ./music:/data/Soulseek Downloads
+      - ./soulseek/shared:/data/Soulseek Shared Folder
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=022
+      - TZ=Europe/Paris
