@@ -112,10 +112,10 @@ cd nova-tunes
 # Créer le fichier .env à la racine du projet
 cp .env.example .env   # si un template existe, sinon créer manuellement
 # Éditer .env et remplir :
-# SLSKD_USERNAME=ton_username_soulseek
+# SLSKD_USERNAME=<YOUR_SOULSEEK_USER>
 # SLSKD_PASSWORD=ton_mot_de_passe_soulseek
-# SLSKD_WEB_USER=slskd
-# SLSKD_WEB_PASS=slskd
+# SLSKD_WEB_USER=<YOUR_SLSKD_WEB_USER>
+# SLSKD_WEB_PASS=<YOUR_SLSKD_WEB_PASS>
 ```
 
 Le `.env` contient tes credentials Soulseek. **Il est dans `.gitignore` — ne JAMAIS le commiter.**
@@ -155,12 +155,12 @@ docker compose up -d
 
 ```bash
 # Credentials Soulseek (compte gratuit sur soulseekqt.net)
-SLSKD_USERNAME=nikodindon2
-SLSKD_PASSWORD=olitec
+SLSKD_USERNAME=<YOUR_SOULSEEK_USER>
+SLSKD_PASSWORD=<YOUR_SOULSEEK_PASS>
 
 # Credentials interface web slskd (optionnel — interface pas vraiment utilisée)
-SLSKD_WEB_USER=slskd
-SLSKD_WEB_PASS=slskd
+SLSKD_WEB_USER=<YOUR_SLSKD_WEB_USER>
+SLSKD_WEB_PASS=<YOUR_SLSKD_WEB_PASS>
 ```
 
 Ces variables sont injectées dans le conteneur `soulseek` par docker-compose et passées à slskd au démarrage.
