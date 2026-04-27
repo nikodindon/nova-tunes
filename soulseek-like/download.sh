@@ -1,44 +1,53 @@
 #!/bin/bash
-# soulseek-like/download.sh
-# Télécharge de la musique via yt-dlp (FMA, Jamendo, YouTube, etc.)
+# Nova-Tunes download wrapper
+# Tries slskd first (Soulseek P2P), falls back to yt-dlp
 # Usage: ./download.sh "The Warning Error"
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
+PYTHON_SCRIPT="$SCRIPT_DIR/download.py"
 YTDLP="/home/niko/bin/yt-dlp"
+MUSIC_DIR="$SCRIPT_DIR/../music"
+LOG_FILE="$SCRIPT_DIR/../data/download.log"
 
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE" 2>/dev/null || echo "$*"
+}
+
+# Check if slskd API is reachable
+slskd_reachable() {
+    curl -s --max-time 3 http://localhost:5030/api/search?q=test >/dev/null 2>&1
+}
+
+# ── Main ────────────────────────────────────────────────────────────────
 if [[ $# -eq 0 ]]; then
-  echo "Usage: $0 \"<requête de recherche>\""
-  echo "Example: $0 \"The Warning Error\""
-  exit 1
+    echo "Usage: $0 \"<requete>\""
+    echo "Example: $0 \"The Warning Error\""
+    exit 1
 fi
 
 QUERY="$1"
-MUSIC_DIR="$(dirname "$(realpath "$0")")/../music"
-LOG_FILE="$(dirname "$(realpath "$0")")/../data/download.log"
+mkdir -p "$(dirname "$LOG_FILE")" "$MUSIC_DIR"
 
-mkdir -p "$MUSIC_DIR" "$(dirname "$LOG_FILE")"
+log "=== Download request: '$QUERY' ==="
 
-log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
-}
-
-log "Recherche : '$QUERY'"
-
-if [[ ! -x "$YTDLP" ]]; then
-  log "ERREUR: yt-dlp non trouvé. Installe-le :"
-  log "  curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /home/niko/bin/yt-dlp"
-  log "  chmod a+rx /home/niko/bin/yt-dlp"
-  exit 1
+if slskd_reachable; then
+    log "-> Using slskd (Soulseek P2P)"
+    python3 "$PYTHON_SCRIPT" "$QUERY"
+else
+    log "-> slskd unreachable, falling back to yt-dlp (YouTube)"
+    if [[ ! -x "$YTDLP" ]]; then
+        log "ERREUR: yt-dlp non trouve: $YTDLP"
+        exit 1
+    fi
+    $YTDLP \
+        --extract-audio \
+        --audio-format mp3 \
+        --audio-quality 0 \
+        --output "$MUSIC_DIR/%(title)s.%(ext)s" \
+        --metadata-from-title "%(artist)s - %(title)s" \
+        "ytsearch10:$QUERY" \
+        && log "OK: yt-dlp termine -> $MUSIC_DIR" \
+        || { log "ERREUR: Echec yt-dlp pour: $QUERY"; exit 1; }
 fi
-
-log "Telechargement en cours..."
-$YTDLP \
-  --extract-audio \
-  --audio-format mp3 \
-  --audio-quality 0 \
-  --output "$MUSIC_DIR/%(title)s.%(ext)s" \
-  --metadata-from-title "%(artist)s - %(title)s" \
-  "ytsearch10:$QUERY" \
-  && log "OK: Telechargement termine -> $MUSIC_DIR" \
-  || { log "ERREUR: Echec du telechargement pour : $QUERY"; exit 1; }

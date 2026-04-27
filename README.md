@@ -11,8 +11,7 @@ Nova-Tunes est un jukebox personnel construit autour de trois briques :
 ```
                     ┌─────────────────────────────────┐
   Internet  ──────►  │       Soulseek P2P              │
-                    │  (download de musique via       │
-                    │   interface web noVNC)           │
+                    │  (slskd daemon + API REST)      │
                     └──────────────┬──────────────────┘
                                    │ fichiers
                                    ▼
@@ -23,9 +22,12 @@ Nova-Tunes est un jukebox personnel construit autour de trois briques :
                                    │ lecture
                                    ▼
                     ┌─────────────────────────────────┐
-                    │    Suggest.py (Recommender)     │
+                    │    Suggest.py (Recommander)     │
                     │  MusicBrainz API → suggestions  │
                     └─────────────────────────────────┘
+
+  Hermes CLI  ────►  download.py (slskd API)
+                    └── pilote les downloads en CLI
 ```
 
 ---
@@ -35,7 +37,7 @@ Nova-Tunes est un jukebox personnel construit autour de trois briques :
 | Feature | Détail |
 |---------|--------|
 | **Player web** | Navidrome sur http://localhost:4533 — lecture, Playlists, search |
-| **P2P downloads** | SoulseekQt via navigateur (noVNC) sur http://localhost:6080 |
+| **Soulseek P2P** | slskd daemon + API REST sur port 5030 — pilotable en CLI ou via interface web (optionnel) |
 | **Recommandations** | Script Python qui interroge MusicBrainz pour trouver des artistes similaires |
 | **100% local** | Aucune donnée ne quitte ta machine — pas de cloud, pas de compte |
 | **Multi-plateforme** | Docker Compose + scripts Python (fonctionne sur Linux / WSL / macOS) |
@@ -46,7 +48,7 @@ Nova-Tunes est un jukebox personnel construit autour de trois briques :
 
 - **Docker** + **Docker Compose** (standalone ou `docker compose` v2)
 - **Python 3.10+** avec `pip`
-- **Ports libres** : 4533, 6080
+- **Ports libres** : 4533, 5030
 
 ---
 
@@ -80,7 +82,7 @@ docker compose up -d
 | Service | URL | Status attendu |
 |---------|-----|----------------|
 | Navidrome (player web) | http://localhost:4533 | Page de login |
-| Soulseek (téléchargement P2P) | http://localhost:6080 | Interface noVNC |
+| Soulseek (API + web UI) | http://localhost:5030 | Interface web slskd |
 
 ---
 
@@ -95,9 +97,8 @@ nova-tunes/
 ├── data/                   # cache du recommender
 ├── navidrome/              # config Navidrome
 │   └── data/               # données Navidrome (non push)
-├── soulseek/               # config Soulseek
-│   ├── appdata/            # données Soulseek (non push)
-│   └── shared/             # dossier partagé (non push)
+├── soulseek/               # config slskd
+│   └── data/              # données slskd (non push)
 ├── recommender/
 │   └── suggest.py          # script de recommandations
 └── docker-compose.yml
@@ -105,11 +106,14 @@ nova-tunes/
 
 ### Ajouter de la musique
 
-**Option A — via Soulseek (recommandé)**
-1. Ouvre http://localhost:6080
-2. Connecte-toi (compte Soulseek gratuit, sans email)
-3. Cherche un artiste / album
-4. Le fichier arrive dans `music/complete/<user>/<album>/`
+**Option A — via Soulseek CLI (Hermes)**
+```bash
+# Directement depuis Hermes :
+# "download The Warning Error"
+./soulseek-like/download.sh "The Warning Error"
+# Ou via l'interface web optionnelle :
+# Ouvre http://localhost:5030
+```
 
 **Option B — via yt-dlp (fallback)**
 ```bash
