@@ -19,7 +19,7 @@ Tout le trafic reste en local. Aucun service cloud.
 │                         INTERNET                                 │
 │                                                                  │
 │   Soulseek P2P Network (port UDP 61112 / TCP 50300 relay)        │
-│         peers: nikodindon2 + millions d'autres utilisateurs       │
+│         peers: <YOUR_SOULSEEK_USER> + millions d'autres utilisateurs │
 └────────────────────────────┬─────────────────────────────────────┘
                              │ TCP REST API
                              ▼
