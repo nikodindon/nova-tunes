@@ -2,7 +2,7 @@
 
 **Ton système musical 100% local — sans cloud, sans pub, sans compte.**
 
-Un jukebox personnel construido autour de trois briques :
+Un jukebox personnel construit autour de trois briques :
 
 - **Navidrome** — serveur de musique web auto-hébergé (comme un Spotify local)
 - **Soulseek** — réseau P2P pour découvrir et télécharger de la musique via slskd (daemon avec API REST)
@@ -29,7 +29,7 @@ Tout le trafic reste en local. Aucun service cloud.
 │  Soulseek daemon process                                          │
 │    - Se connecte au réseau Soulseek avec tes credentials          │
 │    - Sert l'API REST (auth Bearer token)                         │
-│    - Écrit les fichiers téléchargées dans /music                  │
+│    - Écrit les fichiers téléchargés dans /music                  │
 │                                                                  │
 │  Config: SLSKD_SOULSEEK_USERNAME / _PASSWORD (env vars)          │
 └────────────────────────────┬─────────────────────────────────────┘
@@ -77,13 +77,14 @@ Hermes CLI ──► download.py ──► slskd REST API (localhost:5030)
 5. [API slskd — Guide complet](#api-slskd--guide-complet)
 6. [Download CLI — download.py](#download-cli--downloadpy)
 7. [Navidrome — premier accès](#navidrome--premier-accès)
-8. [Le Recommender](#le-recommender)
+8. [Le Recommander](#le-recommander)
 9. [Structure des fichiers](#structure-des-fichiers)
 10. [Commandes utiles](#commandes-utiles)
 11. [Troubleshooting](#troubleshooting)
-12. [FAQ](#faq)
-13. [Stack technique](#stack-technique)
-14. [Roadmap](#roadmap)
+12. [Bugs connus et limitations](#bugs-connus-et-limitations)
+13. [FAQ](#faq)
+14. [Stack technique](#stack-technique)
+15. [Roadmap](#roadmap)
 
 ---
 
@@ -156,7 +157,7 @@ docker compose up -d
 ```bash
 # Credentials Soulseek (compte gratuit sur soulseekqt.net)
 SLSKD_USERNAME=<YOUR_SOULSEEK_USER>
-SLSKD_PASSWORD=<YOUR_SOULSEEK_PASS>
+SLSKD_PASSWORD=<YOUR_...ASS>
 
 # Credentials interface web slskd (optionnel — interface pas vraiment utilisée)
 SLSKD_WEB_USER=<YOUR_SLSKD_WEB_USER>
@@ -194,7 +195,7 @@ python3 soulseek-like/download.py "Pink Floyd Dark Side of the Moon"
 # Voir les résultats sans télécharger
 python3 soulseek-like/download.py "Pink Floyd Dark Side of the Moon" --list
 
-# Avec un timeout de recherche plus long (par défaut 30s)
+# Avec un timeout de recherche plus long (par défaut 40s)
 python3 soulseek-like/download.py "Pink Floyd Dark Side of the Moon" --timeout 60
 ```
 
@@ -212,8 +213,8 @@ ou
 Hermes exécute `download.py` qui :
 1. Authentifie auprès de slskd (`POST /api/v0/session`)
 2. Lance la recherche (`POST /api/v0/searches`)
-3. Attend les résultats (poll toutes les 3s, timeout 30s)
-4. Enqueue le meilleur résultat (bitrate le plus élevé)
+3. Attend les résultats (poll toutes les 2s, timeout 40s)
+4. Enqueue le meilleur résultat (FLAC > MP3, bitrate le plus élevé)
 5. Suit le transfert jusqu'à complétion
 
 ### Accéder à Navidrome
@@ -224,6 +225,8 @@ Hermes exécute `download.py` qui :
 
 Pour rescanner immédiatement :
 ```bash
+docker exec navidrome /app/navidrome scan --full
+# ou via API
 curl -X POST http://localhost:4533/api/v1/do/scan
 ```
 
@@ -231,7 +234,7 @@ curl -X POST http://localhost:4533/api/v1/do/scan
 
 ## API slskd — Guide complet
 
-slskd expose une API REST complète sur `http://localhost:5030`. Toutes les routes都需要 un token Bearer obtenu via authentication.
+slskd expose une API REST complète sur `http://localhost:5030`. Toutes les routes nécessitent un token Bearer obtenu via authentication.
 
 ### Authentication
 
@@ -239,12 +242,14 @@ slskd expose une API REST complète sur `http://localhost:5030`. Toutes les rout
 # Obtenir un token (valide ~7 jours)
 TOKEN=$(curl -s -X POST http://localhost:5030/api/v0/session \
   -H "Content-Type: application/json" \
-  -d '{"username":"slskd","password":"slskd"}' \
+  -d '{"username":"slskd","password": "slskd"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 
 # Utiliser le token dans les requêtes suivantes
 curl http://localhost:5030/api/v0/... -H "Authorization: Bearer $TOKEN"
 ```
+
+**Note** : le endpoint d'auth utilise les credentials de l'interface web slskd (`slskd`/`slskd` par défaut), PAS les credentials Soulseek. slskd valide l'auth web UI pour délivrer le token API.
 
 ### Routes principales
 
@@ -321,7 +326,7 @@ curl -X POST http://localhost:5030/api/v0/transfers/downloads/gr3q \
   -d '[{"filename":"music\\\\Pink Floyd\\\\1973 - Dark Side of the Moon\\\\01 - Pink Floyd - Speak to Me.flac","size":34567890}]'
 ```
 
-Note : les `\\` dans le path sont des backslashes échappés — le format réel est `music\Artist\Album\Track.ext`
+Note : les `\\\\` dans le path sont des backslashes échappés — le format réel est `music\Artist\Album\Track.ext`
 
 ### Suivre un transfert
 
@@ -354,14 +359,15 @@ python3 soulseek-like/download.py "query" --timeout 60      # search timeout
 ### Fonctionnement
 
 ```
-1. Auth slskd → получить Bearer token
-2. POST /api/v0/searches avec UUID
-3. Poll GET /api/v0/searches/{id} toutes les 3s
-4. Quand responseCount > 0 : GET /api/v0/searches/{id}/responses
-5. Extraire tous les fichiers, trier par bitrate (best first)
-6. Enqueue POST /api/v0/transfers/downloads/{username}
-7. Poll GET /api/v0/transfers/downloads jusqu'à Completed
-8. Si slskd inaccessible → fallback yt-dlp (YouTube/SoundCloud)
+1. Auth slskd → obtenir Bearer token (crendentials web UI: slskd/slskd)
+2. POST /api/v0/searches avec UUID généré
+3. Poll GET /api/v0/searches/{id} toutes les 2s
+4. Quand "Completed" dans state → GET /api/v0/searches/{id}/responses
+5. Extraire tous les fichiers, trier par qualité (FLAC > MP3, puis bitrate)
+6. Grouper par album, pick le meilleur album (plus de tracks, meilleure qualité)
+7. Enqueue POST /api/v0/transfers/downloads/{username}
+8. Poll GET /api/v0/transfers/downloads jusqu'à Completed
+9. Si slskd inaccessible → fallback yt-dlp (YouTube/SoundCloud)
 ```
 
 ### Fallback yt-dlp
@@ -381,7 +387,7 @@ Utile comme fallback pour les titres absents de Soulseek.
 
 1. **Ouvrir** : http://localhost:4533
 2. **Compte admin** : crée ton email + mot de passe au premier lancement
-3. **Bibliothèque** : elle est scannée automatiquement au démarrage ettoutes les heures
+3. **Bibliothèque** : elle est scannée automatiquement au démarrage et toutes les heures
 4. **Rescan manuel** : Settings → Library → "Scan media library NOW"
 
 ```bash
@@ -395,7 +401,7 @@ Navidrome supporte : MP3, FLAC, AAC, OGG, WAV, AIFF, WMA, APE, OPUS
 
 ---
 
-## Le Recommender
+## Le Recommander
 
 Le script `recommender/suggest.py` analyse ta bibliothèque locale et te propose de nouveaux artistes via MusicBrainz.
 
@@ -452,7 +458,7 @@ nova-tunes/
 ├── docker-compose.yml        # définition des 2 services
 │
 ├── music/                    # ← bibliothèque musicale (Navidrome scanne ici)
-│   └── (artist)/(album)/    #   structure recommandée: Artist/Year - Album/Track.ext
+│   └── <Artist>/<Album (Year)>/   # structure: Artist/Year - Album/Track.ext
 │
 ├── navidrome/                # données Navidrome
 │   └── data/                # NON COMMITÉ (ignore dans .gitignore)
@@ -485,7 +491,7 @@ nova-tunes/
 ```bash
 # Démarrer / arrêter
 docker-compose up -d        # start
-docker-compose down          # stop ( garde les données)
+docker-compose down          # stop (garde les données)
 docker-compose restart       # restart
 docker-compose restart soulseek  # restart slskd uniquement
 
@@ -500,13 +506,16 @@ docker ps
 # Vérifier que slskd est bien connecté
 docker exec soulseek curl -s http://localhost:5030/api/v0/session \
   -X POST -H "Content-Type: application/json" \
-  -d '{"username":"slskd","password":"slskd"}' | grep token
+  -d '{"username":"slskd","password": "slskd"}' | grep token
 ```
 
 ### Navidrome
 
 ```bash
-# Rescan de la bibliothèque
+# Rescan complet de la bibliothèque
+docker exec navidrome /app/navidrome scan --full
+
+# Rescan via API (sans docker exec)
 curl -X POST http://localhost:4533/api/v1/do/scan
 
 # API Navidrome (liste des albums via curl)
@@ -519,7 +528,7 @@ curl -s http://localhost:4533/api/v1/albums | python3 -m json.tool | head -50
 # Auth
 TOKEN=$(curl -s -X POST http://localhost:5030/api/v0/session \
   -H "Content-Type: application/json" \
-  -d '{"username":"slskd","password":"slskd"}' \
+  -d '{"username":"slskd","password": "slskd"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 
 # Lancer une recherche
@@ -532,7 +541,7 @@ curl -X POST http://localhost:5030/api/v0/searches \
 curl http://localhost:5030/api/v0/searches/test-1 \
   -H "Authorization: Bearer $TOKEN"
 
-# Résultats (après ~20s)
+# Résultats (après ~18-25s — Soulseek est lent)
 curl http://localhost:5030/api/v0/searches/test-1/responses \
   -H "Authorization: Bearer $TOKEN" | python3 -m json.tool | head -80
 ```
@@ -562,13 +571,13 @@ docker-compose restart soulseek
 # Le token a expiré — en générer un nouveau
 TOKEN=$(curl -s -X POST http://localhost:5030/api/v0/session \
   -H "Content-Type: application/json" \
-  -d '{"username":"slskd","password":"slskd"}' \
+  -d '{"username":"slskd","password": "slskd"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 ```
 
-### Search lancé mais pas de résultats après 30s
+### Search lancé mais pas de résultats après 40s
 
-Les searches Soulseek prennent du temps (peer discovery). Augmente le timeout :
+Les searches Soulseek prennent du temps (peer discovery). Le timeout par défaut est 40s, augmente si besoin :
 
 ```bash
 python3 soulseek-like/download.py "query" --timeout 60
@@ -582,8 +591,8 @@ Le réseau Soulseek peut aussi être lent en heure de pointe.
 # 1. Vérifier que les fichiers sont dans /music
 ls -la music/
 
-# 2. Lancer un scan manuel
-curl -X POST http://localhost:4533/api/v1/do/scan
+# 2. Lancer un scan manuel complet
+docker exec navidrome /app/navidrome scan --full
 
 # 3. Vérifier les logs Navidrome
 docker logs navidrome 2>&1 | grep -i scan
@@ -613,6 +622,34 @@ ss -tlnp | grep -E '4533|5030|50300'
 
 ---
 
+## Bugs connus et limitations
+
+### API enqueue — responses et files n'ont pas de champ `id`
+
+Les fichiers retournés par `GET /api/v0/searches/{id}/responses` n'ont pas de champ `id`. Le endpoint `PUT /api/v0/searches/{id}/responses/{fileId}` (qui nécessiterait cet ID) retourne 404. Le seul endpoint d'enqueue qui fonctionne est `POST /api/v0/transfers/downloads/{username}` avec le `filename` exact.
+
+### Poll interval — les résultats arrivent après ~18-25s
+
+Les searches Soulseek ne retournent pas de résultats immédiatement. Il faut poll toutes les 2-3s pendant 20-30s. `download.py` gère ça, mais un search avec `--timeout 10` sera toujours vide.
+
+### Caractères non-ASCII dans les filenames sources
+
+Certains peers partagent des fichiers avec des caractères `★` (Etoile), backslashes `\\`, ou des chemins Windows complets. `download.py` nettoie les noms de fichiers pour le stockage local, mais le `filename` utilisé pour l'enqueue doit matcher exactement ce que le peer partage. Tout décalage peut causer des downloads silencieux qui restent à 0%.
+
+### Bitrate VBR pas fiable pour comparer des fichiers MP3
+
+Le champ `bitRate` dans les réponses slskd représente souvent le bitrate moyen ou nominal. Pour les MP3 VBR, ce n'est pas un indicateur fiable de qualité. Comparer par taille de fichier est plus robuste.
+
+### slskd ne partage pas automatiquement ta bibliothèque
+
+Par défaut, slskd télécharge dans `/music` sans partager ce dossier sur le réseau Soulseek. Tes fichiers restent locaux. Pour les partager, configure `directories.shares` dans `soulseek/data/slskd.yml`.
+
+### DLNA non supporté
+
+Navidrome ne supporte pas DLNA/UPnP nativement. Si tu veux caster sur une TV ou Chromecast, utilise un middleware comme `ymuse` ou `GMediaRender`.
+
+---
+
 ## FAQ
 
 **Q : Pourquoi slskd plutôt que SoulseekQt ?**
@@ -627,7 +664,7 @@ Va sur https://www.soulseekqt.net/network.html — c'est gratuit, sans email, en
 
 Non. Par défaut, slskd télécharge dans `/music` sans partager ce dossier. Pour partager ta bibliothèque avec le réseau Soulseek, configure un dossier de partages dans `soulseek/data/slskd.yml` (option `directories.shares`). Tes fichiers restent en local.
 
-**Q : Le recommender est lent, pourquoi ?**
+**Q : Le recommander est lent, pourquoi ?**
 
 MusicBrainz limite ses requêtes à 1/seconde. Le script ajoute 0.55s de délai entre chaque appel. 5 artistes = ~25 secondes minimum.
 
@@ -657,7 +694,7 @@ L'image est tagguée `slskd/slskd:latest`. Tes credentials dans `.env` persisten
 | Player web | **Navidrome** (Docker) | Serveur de musique, UI web, lecture, scanning |
 | P2P daemon | **slskd** (Docker) | Client Soulseek avec API REST |
 | Downloads CLI | **Python 3** (download.py) | Automatisation des searches + downloads |
-| Recommender | **Python 3** + musicbrainzngs | Suggestions par tags MusicBrainz |
+| Recommander | **Python 3** + musicbrainzngs | Suggestions par tags MusicBrainz |
 | Métadonnées audio | **mutagen** (Python) | Lecture des tags ID3 |
 | Conteneurisation | **Docker Compose** | Orchestration des services |
 
@@ -666,8 +703,12 @@ L'image est tagguée `slskd/slskd:latest`. Tes credentials dans `.env` persisten
 ## Roadmap
 
 - [x] **v1** — Navidrome + SoulseekQt (docker-compose, network_mode host)
-- [x] **v2** — Recommender avec MusicBrainz (suggestions par tag)
+- [x] **v2** — Recommander avec MusicBrainz (suggestions par tag)
 - [x] **v3** — Remplacement SoulseekQt → slskd (API REST, pilotable CLI)
+- [ ] **v3.1** — Fix download.py : multi-source album (assembler un album depuis plusieurs peers si un seul ne l'a pas complet)
+- [ ] **v3.2** — Fix download.py : gestion filenames avec caractères non-ASCII (★, backslashes Windows) — nécessite de garder le filename exact pour l'enqueue
+- [ ] **v3.3** — Fix download.py : lecture credentials slskd depuis `.env` (actuellement hardcodé `slskd/slskd`)
+- [ ] **v3.4** — Fix download.py : qualité FLAC 24-bit > FLAC 16-bit > MP3 320 > MP3 VBR (bitdepth/samplerate disponibles dans l'API)
 - [ ] **v4** — Listen log : tracker l'historique d'écoute pour améliorer les suggestions
 - [ ] **v5** — Recherche unifiée (Navidrome + suggestions dans une même interface)
 - [ ] **v6** — Export de playlists (M3U, JSON)
