@@ -53,6 +53,8 @@ def api_get(path: str, token: str) -> dict | list:
          "-H", f"Authorization: Bearer {token}"],
         capture_output=True, text=True, timeout=10
     )
+    if not r.stdout:
+        return {}
     return json.loads(r.stdout)
 
 
@@ -64,6 +66,8 @@ def api_post(path: str, token: str, data: dict) -> dict | list:
          "-d", json.dumps(data)],
         capture_output=True, text=True, timeout=10
     )
+    if not r.stdout:
+        return {}
     return json.loads(r.stdout)
 
 

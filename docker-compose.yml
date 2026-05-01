@@ -6,7 +6,7 @@ services:
     network_mode: host
     volumes:
       - ./navidrome/data:/data
-      - ./music:/music:ro
+      - ./music:/music:rw
     environment:
       - ND_SCANSCHEDULE=1h
       - ND_LOGLEVEL=info
@@ -23,10 +23,13 @@ services:
       - ./soulseek/data:/app
       - ./music:/music
     environment:
-      - SLSKD_SOULSEEK_USERNAME=${SLSKD_USERNAME}
-      - SLSKD_SOULSEEK_PASSWORD=${SLSKD_PASSWORD}
-      - SLSKD_WEB_AUTHENTICATION_DISABLED=false
-      - SLSKD_WEB_AUTHENTICATION_USERNAME=${SLSKD_WEB_USER:-slskd}
-      - SLSKD_WEB_AUTHENTICATION_PASSWORD=${SLSKD_WEB_PASS:-slskd}
+      # Soulseek account credentials (v0.25.x variable names)
+      - SLSKD_SOULSEEK_USERNAME=${SLSKD_SOULSEEK_USERNAME}
+      - SLSKD_SOULSEEK_PASSWORD=${SLSKD_SOULSEEK_PASSWORD}
+      # Web UI authentication (disabled = no login required)
+      - SLSKD_WEB_AUTHENTICATION_DISABLED=${SLSKD_WEB_AUTHENTICATION_DISABLED}
+      - SLSKD_WEB_AUTHENTICATION_USERNAME=${SLSKD_WEB_AUTHENTICATION_USERNAME}
+      - SLSKD_WEB_AUTHENTICATION_PASSWORD=${SLSKD_WEB_AUTHENTICATION_PASSWORD}
+      # Download directory
       - SLSKD_DIRECTORIES_DOWNLOADS=/music
     user: "1000:1000"
